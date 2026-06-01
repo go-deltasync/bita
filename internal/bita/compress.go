@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
@@ -28,16 +29,36 @@ type Compression struct {
 	level     uint32
 }
 
+// brotliPools holds a reusable pool of brotli writers per compression level.
+// A fresh brotli.Writer lazily allocates an 8 MiB ring buffer (and hash tables)
+// for any chunk >= the 64 KiB block size, so creating one per chunk is very
+// wasteful; brotli.Writer.Reset lets us reuse those buffers across chunks. The
+// pool is safe for the concurrent per-chunk compression in Compress.
+var brotliPools sync.Map // level int -> *sync.Pool of *brotli.Writer
+
+func brotliCompress(data []byte, level int) []byte {
+	pv, ok := brotliPools.Load(level)
+	if !ok {
+		pv, _ = brotliPools.LoadOrStore(level, &sync.Pool{
+			New: func() any { return brotli.NewWriterLevel(io.Discard, level) },
+		})
+	}
+	pool := pv.(*sync.Pool)
+	w := pool.Get().(*brotli.Writer)
+	var buf bytes.Buffer
+	w.Reset(&buf)
+	_, _ = w.Write(data)
+	_ = w.Close()
+	pool.Put(w)
+	return buf.Bytes()
+}
+
 // compress returns the compressed form of data. Compression to an in-memory
 // buffer is infallible for the algorithms we support, so no error is returned.
 func (c Compression) compress(data []byte) []byte {
 	switch c.algorithm {
 	case compBrotli:
-		var buf bytes.Buffer
-		w := brotli.NewWriterLevel(&buf, int(c.level))
-		_, _ = w.Write(data)
-		_ = w.Close()
-		return buf.Bytes()
+		return brotliCompress(data, int(c.level))
 	case compZstd:
 		return zstdEncoder.EncodeAll(data, nil)
 	default: // compNone
