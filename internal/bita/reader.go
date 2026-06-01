@@ -29,7 +29,7 @@ func (r *ioReader) readAt(offset uint64, size int) ([]byte, error) {
 		if err == nil {
 			err = io.ErrUnexpectedEOF
 		}
-		return nil, err
+		return nil, fmt.Errorf("bita: short read at offset %d: wanted %d, got %d: %w", offset, size, n, err)
 	}
 	return buf, nil
 }
