@@ -12,10 +12,14 @@ import (
 
 // zstd encoder/decoder singletons. Construction with default options is
 // infallible in practice; the discarded errors keep the package free of
-// unreachable error branches (see org coverage rule).
+// unreachable error branches (see org coverage rule). EncodeAll/DecodeAll are
+// safe for concurrent use, so these are shared across worker goroutines.
 var (
 	zstdEncoder, _ = zstd.NewWriter(nil)
 	zstdDecoder, _ = zstd.NewReader(nil)
+	// zstdProbe is a fastest-level encoder used only as a cheap
+	// incompressibility predictor (see Compression.skipCompression).
+	zstdProbe, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 )
 
 // Compression describes how chunk data is compressed.
@@ -39,6 +43,21 @@ func (c Compression) compress(data []byte) []byte {
 	default: // compNone
 		return data
 	}
+}
+
+// skipCompression reports whether brotli should be skipped for this chunk. We
+// run a very fast zstd probe: if even that finds no redundancy (cannot shrink
+// the chunk at all), the data is incompressible and the far more expensive
+// brotli pass would only end up discarded by the "store uncompressed when not
+// smaller" rule — so we skip it. The probe is LZ-based, so genuinely redundant
+// chunks (e.g. internal repeats) are NOT skipped; it only fires on data with no
+// exploitable redundancy. Only relevant for brotli (zstd is its own encoder;
+// none does not compress).
+func (c Compression) skipCompression(data []byte) bool {
+	if c.algorithm != compBrotli {
+		return false
+	}
+	return len(zstdProbe.EncodeAll(data, nil)) >= len(data)
 }
 
 // toDict converts the compression into its dictionary message.

@@ -113,9 +113,14 @@ in-place seeding (`--seed-output`) is not yet implemented.
 
 ## Performance
 
-Per-chunk hashing and compression run in parallel across CPU cores (mirroring
-bita's `num_chunk_buffers` pipeline); chunking, deduplication and archive layout
-stay sequential, so the output is byte-identical to a single-threaded run.
+Per-chunk work runs in parallel across CPU cores (mirroring bita's
+`num_chunk_buffers` pipeline): chunk hashing and compression on `compress`,
+chunk hashing of seeds and chunk decompression/verification on `clone`. The
+inherently sequential rolling-hash scan, deduplication and archive layout stay
+serial, so the output is byte-identical to a single-threaded run. Before the
+(expensive) brotli pass, a fast zstd probe skips compression for chunks with no
+exploitable redundancy — avoiding work that the "store uncompressed when not
+smaller" rule would discard anyway.
 
 ### Protocol
 
@@ -140,14 +145,15 @@ Measured on an Apple M4 Max (16 cores), Go 1.26, Rust `bita` 0.14.0:
 
 | impl        | compress   | clone (seed) | archive bytes |
 |-------------|------------|--------------|---------------|
-| go-bita     | 224 MB/s   | 291 MB/s     | 16,807,200    |
-| rust bita   | 270 MB/s   | 367 MB/s     | 16,807,189    |
+| go-bita     | 275 MB/s   | 369 MB/s     | 16,807,200    |
+| rust bita   | 263 MB/s   | 375 MB/s     | 16,807,189    |
 
-Archive size matches the reference to **11 bytes**, and throughput is within
-~1.2× — close for a pure-Go, cgo-free build versus optimized Rust. brotli (the
-`andybalholm/brotli` library) dominates compress time; parallelizing it across
-cores is what closes most of the gap. Numbers are machine-dependent and
-indicative.
+Archive size matches the reference to **11 bytes**, and throughput is at parity
+— notable for a pure-Go, cgo-free build versus optimized Rust. On this
+incompressible worst case the zstd probe lets us skip brotli where the reference
+still runs (and discards) it; on compressible inputs both run brotli and the
+parallel pipeline keeps the two close. Numbers are machine-dependent and
+indicative; rerun the test on your hardware for a local comparison.
 
 ## License
 

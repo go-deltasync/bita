@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"runtime"
 
 	"golang.org/x/crypto/blake2b"
 )
@@ -70,9 +71,14 @@ func writeChunk(out io.WriterAt, offsets []uint64, data []byte) error {
 func Clone(a *Archive, out CloneTarget, opts CloneOptions) (CloneStats, error) {
 	idx := a.sourceIndex()
 	stats := CloneStats{TotalSize: a.dict.sourceTotalSize}
+	workers := runtime.NumCPU()
 
 	// Seed stage: chunk each seed with the archive's config and place matches.
+	// The rolling-hash scan is sequential, but the per-chunk Blake2b hashing is
+	// parallelized; index lookups and writes stay sequential (deterministic, no
+	// concurrent writes to the output).
 	for _, seed := range opts.Seeds {
+		var datas [][]byte
 		ch := newChunker(seed, a.cfg)
 		for {
 			_, data, err := ch.next()
@@ -82,13 +88,19 @@ func Clone(a *Archive, out CloneTarget, opts CloneOptions) (CloneStats, error) {
 			if err != nil {
 				return stats, err
 			}
-			full := blake2b.Sum512(data)
-			key := string(full[:a.hashLength])
+			datas = append(datas, data)
+		}
+		keys := make([]string, len(datas))
+		parallelMap(len(datas), workers, func(i int) {
+			full := blake2b.Sum512(datas[i])
+			keys[i] = string(full[:a.hashLength])
+		})
+		for i, key := range keys {
 			loc, ok := idx[key]
 			if !ok {
 				continue
 			}
-			if err := writeChunk(out, loc.offsets, data); err != nil {
+			if err := writeChunk(out, loc.offsets, datas[i]); err != nil {
 				return stats, err
 			}
 			stats.FromSeed += uint64(loc.size) * uint64(len(loc.offsets))
@@ -115,21 +127,32 @@ func Clone(a *Archive, out CloneTarget, opts CloneOptions) (CloneStats, error) {
 		if err != nil {
 			return stats, err
 		}
-		for i, cd := range need {
-			raw := blobs[i]
-			data := raw
-			if int(cd.sourceSize) != len(raw) {
-				data, err = decompressChunk(raw, a.compression, int(cd.sourceSize))
-				if err != nil {
-					return stats, err
+		// Decompress and verify the fetched chunks in parallel (brotli/zstd
+		// decompression is the cost); each worker writes only its own slot.
+		datas := make([][]byte, len(need))
+		errs := make([]error, len(need))
+		parallelMap(len(need), workers, func(i int) {
+			cd := need[i]
+			data := blobs[i]
+			if int(cd.sourceSize) != len(data) {
+				data, errs[i] = decompressChunk(data, a.compression, int(cd.sourceSize))
+				if errs[i] != nil {
+					return
 				}
 			}
 			full := blake2b.Sum512(data)
 			if !bytes.Equal(full[:a.hashLength], cd.checksum) {
-				return stats, fmt.Errorf("bita: chunk checksum mismatch")
+				errs[i] = fmt.Errorf("bita: chunk checksum mismatch")
+				return
+			}
+			datas[i] = data
+		})
+		for i, cd := range need {
+			if errs[i] != nil {
+				return stats, errs[i]
 			}
 			loc := idx[string(cd.checksum)]
-			if err := writeChunk(out, loc.offsets, data); err != nil {
+			if err := writeChunk(out, loc.offsets, datas[i]); err != nil {
 				return stats, err
 			}
 			stats.FromArchive += uint64(loc.size) * uint64(len(loc.offsets))

@@ -232,10 +232,15 @@ func Compress(in io.Reader, out io.Writer, conf CompressConfig) error {
 		rebuildOrder[i] = uint32(idx)
 	}
 
-	// Stage 4 (parallel): compress the unique chunks.
+	// Stage 4 (parallel): compress the unique chunks. A fast incompressibility
+	// probe skips the expensive brotli pass for chunks that won't shrink.
 	useData := make([][]byte, len(unique))
 	parallelMap(len(unique), workers, func(j int) {
 		data := chunks[unique[j]]
+		if comp.skipCompression(data) {
+			useData[j] = data
+			return
+		}
 		compressed := comp.compress(data)
 		if len(compressed) >= len(data) {
 			useData[j] = data
