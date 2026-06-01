@@ -111,6 +111,21 @@ func TestCompatRustCompressGoClone(t *testing.T) {
 			if err != nil {
 				t.Fatalf("go open: %v", err)
 			}
+			if fi, e := f.Stat(); e == nil { // TEMP diagnostic
+				var sum uint64
+				for _, cd := range a.dict.chunkDescriptors {
+					sum += uint64(cd.archiveSize)
+				}
+				nd := len(a.dict.chunkDescriptors)
+				var lo uint64
+				var ls uint32
+				if nd > 0 {
+					lo = a.dict.chunkDescriptors[nd-1].archiveOffset
+					ls = a.dict.chunkDescriptors[nd-1].archiveSize
+				}
+				t.Logf("[geom %s] fileSize=%d chunkDataOffset=%d descriptors=%d rebuild=%d sumArchiveSize=%d end=%d lastOff=%d lastSize=%d totalSrc=%d",
+					algo, fi.Size(), a.chunkDataOffset, nd, len(a.dict.rebuildOrder), sum, a.chunkDataOffset+sum, lo, ls, a.dict.sourceTotalSize)
+			}
 			out := newMemTarget()
 			if _, err := Clone(a, out, CloneOptions{VerifyOutput: true}); err != nil {
 				t.Fatalf("go clone: %v", err)
