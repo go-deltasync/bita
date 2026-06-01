@@ -75,6 +75,22 @@ Flags: `--seed` (repeatable, `-` for stdin), `--verify-output`,
 `--verify-header CHECKSUM`, `--force`, and HTTP options
 `--http-retry-count`, `--http-retry-delay`, `--http-timeout`, `--http-header`.
 
+## Library
+
+The package is importable for use in other Go programs (pure Go, no cgo):
+
+```go
+import "github.com/go-deltasync/bita"
+
+var arc bytes.Buffer
+_ = bita.Compress(input, &arc, bita.CompressConfig{}) // default: RollSum + brotli
+a, _ := bita.OpenArchiveReaderAt(bytes.NewReader(arc.Bytes()))
+_, _ = bita.Clone(a, out, bita.CloneOptions{Seeds: []io.Reader{seed}})
+```
+
+`OpenArchiveHTTP` opens a remote archive over HTTP Range requests, and
+`Archive.Info` reports its chunker/compression metadata.
+
 ## Archive format (`.cba`)
 
 ```
