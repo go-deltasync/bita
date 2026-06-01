@@ -1,5 +1,12 @@
 # bita
 
+[![ci](https://github.com/go-deltasync/bita/actions/workflows/ci.yml/badge.svg)](https://github.com/go-deltasync/bita/actions/workflows/ci.yml)
+[![compat](https://github.com/go-deltasync/bita/actions/workflows/compat.yml/badge.svg)](https://github.com/go-deltasync/bita/actions/workflows/compat.yml)
+[![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/go-deltasync/bita/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-deltasync/bita.svg)](https://pkg.go.dev/github.com/go-deltasync/bita)
+[![Go version](https://img.shields.io/github/go-mod/go-version/go-deltasync/bita)](go.mod)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+
 Pure-Go, cgo-free, [`oll3/bita`](https://github.com/oll3/bita)-compatible
 differential file synchronization. `bita` chunks a file with a content-defined
 rolling-hash chunker, stores the unique chunks in a compressed `.cba` archive,
