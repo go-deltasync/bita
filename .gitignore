@@ -1,0 +1,7 @@
+/bita
+/bita.exe
+/dist/
+*.cba
+cover.out
+cover-pkg.out
+cover.txt

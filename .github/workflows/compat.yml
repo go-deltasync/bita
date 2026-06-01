@@ -1,0 +1,40 @@
+name: compat
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compat:
+    name: cross-impl compat (linux / oll3/bita)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          check-latest: true
+
+      # Best-effort: a failure here leaves the job green and the compat tests
+      # skip (the `bita` binary is simply absent from PATH).
+      - name: Build upstream bita (Rust)
+        continue-on-error: true
+        run: |
+          set -eu
+          # The reference implementation is the Rust `bita` CLI. Install it from
+          # crates.io; if this fails the compat tests skip and the job stays
+          # green.
+          cargo install bita --locked
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/bita" --version 2>&1 | head -n 1 || true
+
+      - name: Compat tests
+        run: go test -v -tags=compat ./internal/bita/...
