@@ -190,9 +190,22 @@ func Compress(in io.Reader, out io.Writer, conf CompressConfig) error {
 		return err
 	}
 
-	// Stage 1 (sequential): chunk the stream, accumulate the source checksum in
-	// source order, and buffer the chunks.
+	// Stage 1 (sequential chunking + concurrent file-wide hash): chunk the
+	// stream and buffer the chunks. The file-wide source checksum is a single
+	// sequential Blake2b-512 (its digest cannot be split across cores without
+	// changing it and breaking compat), but it is independent of the rolling
+	// chunk scan, so it runs on its own goroutine fed in source order — Stage 1
+	// then costs max(chunking, hashing) instead of their sum. Each chunk slice
+	// is a fresh copy (chunker.emit), so sharing it with the hasher is race-free.
 	srcHasher, _ := blake2b.New512(nil)
+	hashCh := make(chan []byte, 64)
+	hashDone := make(chan struct{})
+	go func() {
+		for data := range hashCh {
+			_, _ = srcHasher.Write(data)
+		}
+		close(hashDone)
+	}()
 	var sourceLength uint64
 	var chunks [][]byte
 	ch := newChunker(in, cfg)
@@ -202,12 +215,16 @@ func Compress(in io.Reader, out io.Writer, conf CompressConfig) error {
 			break
 		}
 		if err != nil {
+			close(hashCh)
+			<-hashDone
 			return err
 		}
-		_, _ = srcHasher.Write(data)
 		sourceLength += uint64(len(data))
 		chunks = append(chunks, data)
+		hashCh <- data
 	}
+	close(hashCh)
+	<-hashDone
 
 	// Stage 2 (parallel): hash every chunk.
 	hashes := make([][64]byte, len(chunks))

@@ -140,10 +140,14 @@ Per-chunk work runs in parallel across CPU cores (mirroring bita's
 `num_chunk_buffers` pipeline): chunk hashing and compression on `compress`,
 chunk hashing of seeds and chunk decompression/verification on `clone`. The
 inherently sequential rolling-hash scan, deduplication and archive layout stay
-serial, so the output is byte-identical to a single-threaded run. Before the
-(expensive) brotli pass, a fast zstd probe skips compression for chunks with no
-exploitable redundancy — avoiding work that the "store uncompressed when not
-smaller" rule would discard anyway.
+serial, so the output is byte-identical to a single-threaded run. The file-wide
+source checksum is a single sequential Blake2b-512 (its digest can't be split
+across cores without changing it), but it is independent of the chunk scan, so
+it runs on its own goroutine fed in source order — overlapping the hash with
+chunking instead of serializing after it (~20% faster on the chunk+hash stage
+for incompressible input). Before the (expensive) brotli pass, a fast zstd probe
+skips compression for chunks with no exploitable redundancy — avoiding work that
+the "store uncompressed when not smaller" rule would discard anyway.
 
 ### Protocol
 
