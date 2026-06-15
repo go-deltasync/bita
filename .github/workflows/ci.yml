@@ -10,14 +10,21 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: test (${{ matrix.os }} / go${{ matrix.go }})
+  # Native runners: amd64 + arm64 Linux, plus macOS/Windows for cross-OS
+  # coverage. Each runs the full race-enabled suite and enforces the org-wide
+  # 100% coverage gate on internal/bita (the library where the format and
+  # algorithm-correctness logic lives; the cmd/ CLI is a thin wrapper).
+  native:
+    name: native (${{ matrix.os }} / ${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        go: ["1.22", "1.23"]
+        include:
+          - { os: ubuntu-latest,    arch: amd64 }
+          - { os: ubuntu-24.04-arm, arch: arm64 }
+          - { os: macos-latest,     arch: arm64 }
+          - { os: windows-latest,   arch: amd64 }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -25,8 +32,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go }}
-          check-latest: true
+          go-version: stable
 
       - name: Show Go version
         run: go version
@@ -57,6 +63,81 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cover-${{ matrix.os }}-go${{ matrix.go }}
+          name: cover-${{ matrix.os }}-${{ matrix.arch }}
           path: cover.out
           if-no-files-found: warn
+
+  # Emulated runners: the remaining 64-bit Go targets under QEMU via binfmt.
+  # We cross-compile a coverage-instrumented test binary per package and run it
+  # inside the matching debian image, enforcing the same 100% gate on
+  # internal/bita. s390x is big-endian — a real test for bita's binary chunk
+  # index and Blake3/Blake2b hashing. No fuzzing under emulation.
+  emulated:
+    name: emulated (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: riscv64, image: "debian:trixie",               qemu: "rv64,v=true,vlen=128" }
+          - { arch: loong64, image: "ghcr.io/loong64/debian:trixie", qemu: "la464" }
+          - { arch: ppc64le, image: "debian:trixie",               qemu: "power9" }
+          - { arch: s390x,   image: "debian:trixie",               qemu: "qemu" }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Show Go version
+        run: go version
+
+      - name: Register binfmt handlers
+        run: docker run --privileged --rm tonistiigi/binfmt --install all
+
+      - name: Vet
+        run: GOOS=linux GOARCH=${{ matrix.arch }} go vet ./...
+
+      - name: Cross-compile test binaries
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tests
+          # Build a cover-instrumented test binary per package. Packages with no
+          # test files are skipped (go test -c emits nothing for them).
+          for pkg in $(go list ./...); do
+            name=$(echo "$pkg" | tr '/.' '__')
+            CGO_ENABLED=0 GOOS=linux GOARCH=${{ matrix.arch }} \
+              go test -c -cover -coverpkg=./... -o "/tmp/tests/${name}.test" "$pkg" || true
+          done
+          ls -l /tmp/tests
+
+      - name: Run tests under QEMU + enforce 100% on internal/bita
+        run: |
+          set -euo pipefail
+          pkg_cov=""
+          for bin in /tmp/tests/*.test; do
+            [ -e "$bin" ] || continue
+            name=$(basename "$bin")
+            echo "::group::${name} (${{ matrix.arch }})"
+            out=$(docker run --rm --platform linux/${{ matrix.arch }} \
+              -e QEMU_CPU='${{ matrix.qemu }}' \
+              -v /tmp/tests:/t ${{ matrix.image }} \
+              "/t/${name}" -test.v)
+            echo "$out"
+            echo "::endgroup::"
+            # Capture the coverage figure reported by the internal/bita suite.
+            case "$name" in
+              *internal_bita.test)
+                pkg_cov=$(echo "$out" | sed -n 's/^coverage: \([0-9.]*\)% of statements.*/\1/p' | tail -n 1)
+                ;;
+            esac
+          done
+          echo "internal/bita coverage (${{ matrix.arch }}): ${pkg_cov:-<none>}%"
+          if [ -z "${pkg_cov}" ]; then
+            echo "::error::could not determine internal/bita coverage"; exit 1
+          fi
+          awk -v t="$pkg_cov" 'BEGIN { exit !(t+0 >= 100.0) }' || {
+            echo "::error::internal/bita coverage ${pkg_cov}% < 100% on ${{ matrix.arch }}"; exit 1; }
