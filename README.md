@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/go-deltasync/brand/main/social/go-deltasync.png" alt="go-deltasync/bita" width="720"></p>
+
 # bita
 
 [![ci](https://github.com/go-deltasync/bita/actions/workflows/ci.yml/badge.svg)](https://github.com/go-deltasync/bita/actions/workflows/ci.yml)
