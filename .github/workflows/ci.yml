@@ -37,6 +37,20 @@ jobs:
       - name: Show Go version
         run: go version
 
+      - name: Gofmt
+        # There was no such step, and internal/bita/dict_test.go had been
+        # unformatted on main for long enough that nothing noticed. One lane is
+        # enough: the answer does not depend on the machine.
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'amd64'
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - name: Vet
         run: go vet ./...
 

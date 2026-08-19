@@ -6,25 +6,11 @@ import (
 	"testing"
 )
 
-func TestBuzHashKnownVector(t *testing.T) {
-	h := newBuzHash(5)
-	var got uint32
-	gotSet := false
-	for _, v := range []byte{1, 2, 3, 4, 5} {
-		if !h.initDone() {
-			h.init(v)
-		} else {
-			h.input(v)
-		}
-		if h.initDone() && !gotSet {
-			got = h.sum()
-			gotSet = true
-		}
-	}
-	if got != 1406929643 {
-		t.Fatalf("buzhash first valid sum = %d, want 1406929643", got)
-	}
-}
+// The BuzHash vector that was here is the same one
+// TestReferenceBuzHashLastValidVector pins in
+// github.com/go-deltasync/chunk, which is where the hash now lives. What is
+// still worth checking here is the whole of it: that an archive written with
+// each algorithm still reads back, through the shared chunker.
 
 func TestCompressCloneRoundTrip(t *testing.T) {
 	rng := rand.New(rand.NewSource(1))
