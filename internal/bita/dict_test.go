@@ -114,10 +114,10 @@ func TestUnmarshalDictionaryErrors(t *testing.T) {
 	}
 	badSub := []byte{0x08} // field 1 varint, truncated
 	cases := map[string][]byte{
-		"chunker_params":   appendMessageField(nil, 4, badSub),
+		"chunker_params":    appendMessageField(nil, 4, badSub),
 		"chunk_compression": appendMessageField(nil, 5, badSub),
-		"chunk_descriptor": appendMessageField(nil, 7, badSub),
-		"map_entry":        appendMessageField(nil, 8, badSub),
+		"chunk_descriptor":  appendMessageField(nil, 7, badSub),
+		"map_entry":         appendMessageField(nil, 8, badSub),
 	}
 	for name, b := range cases {
 		if _, err := unmarshalDictionary(b); err == nil {

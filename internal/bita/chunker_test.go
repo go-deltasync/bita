@@ -146,17 +146,12 @@ func TestChunkerReadError(t *testing.T) {
 	}
 }
 
-func TestSaturatingSub(t *testing.T) {
-	if saturatingSub(10, 3) != 7 || saturatingSub(3, 10) != 0 {
-		t.Fatal("saturatingSub")
-	}
-}
-
-func TestFilterHelpers(t *testing.T) {
+// saturatingSub and filterMask went to github.com/go-deltasync/chunk with the
+// scan that used them, and are tested there. What is still bita's is turning an
+// average into the filter-bits an archive header records, so that is what is
+// still checked here.
+func TestFilterBitsFromSize(t *testing.T) {
 	if filterBitsFromSize(64*1024) != 15 {
 		t.Fatalf("filterBitsFromSize = %d", filterBitsFromSize(64*1024))
-	}
-	if filterMask(3) != 0b111 {
-		t.Fatalf("filterMask = %b", filterMask(3))
 	}
 }
