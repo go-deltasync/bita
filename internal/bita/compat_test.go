@@ -101,6 +101,27 @@ func TestCompatRustCompressGoClone(t *testing.T) {
 			if output, err := cmd.CombinedOutput(); err != nil {
 				t.Fatalf("rust bita compress: %v\n%s", err, output)
 			}
+			// ⛔ MEASURE WHAT THE WRITER PRODUCED, so a failure below says
+			// which side is wrong.
+			//
+			// This lane failed 2 of 22 runs (2026-10-04, 2026-10-10) with
+			//
+			//   bita: short read at offset 914: wanted 479542, got 441045: EOF
+			//
+			// which READS as a reader fault and is not one. 914+479542 =
+			// 480456, and that is exactly the size of a correct archive for
+			// this input -- measured byte-identical over three runs of
+			// bita 0.15.0, which is reproducible because compatData is seeded.
+			// The file in CI held 441959 bytes: 38497 short. The reader asked
+			// for the right extent; the WRITE was incomplete.
+			//
+			// It does not reproduce on darwin/arm64 in six runs, so the next
+			// occurrence has to diagnose itself rather than wait for someone
+			// to subtract those numbers again.
+			written := int64(-1)
+			if st, err := os.Stat(archive); err == nil {
+				written = st.Size()
+			}
 
 			f, err := os.Open(archive)
 			if err != nil {
@@ -113,7 +134,10 @@ func TestCompatRustCompressGoClone(t *testing.T) {
 			}
 			out := newMemTarget()
 			if _, err := Clone(a, out, CloneOptions{VerifyOutput: true}); err != nil {
-				t.Fatalf("go clone: %v", err)
+				t.Fatalf("go clone: %v\narchive on disk: %d bytes, written by %s\n"+
+					"⛔ If that error is a short read whose offset+wanted EXCEEDS the "+
+					"size above, the ARCHIVE is truncated and the writer is at fault, "+
+					"not the reader.", err, written, bin)
 			}
 			if !bytes.Equal(out.bytes(), src) {
 				t.Fatal("go clone of rust archive mismatched source")
